@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2002, 2015, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2002, 2013, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -49,8 +49,6 @@ public class SynthProgressBarUI extends BasicProgressBarUI
     private boolean paintOutsideClip;
     private boolean tileWhenIndeterminate; //whether to tile indeterminate painting
     private int tileWidth; //the width of each tile
-    private Dimension minBarSize; // minimal visible bar size
-    private int glowWidth; // Glow around the bar foreground
 
     /**
      * Creates a new UI object for the given component.
@@ -116,8 +114,6 @@ public class SynthProgressBarUI extends BasicProgressBarUI
                 tileWidth *= 0.784;
             }
         }
-        minBarSize = (Dimension)style.get(context, "ProgressBar.minBarSize");
-        glowWidth = style.getInt(context, "ProgressBar.glowWidth", 0);
         context.dispose();
     }
 
@@ -262,7 +258,7 @@ public class SynthProgressBarUI extends BasicProgressBarUI
 
                     if (!SynthLookAndFeel.isLeftToRight(pBar)) {
                         x = pBar.getWidth() - pBarInsets.right - width
-                                - progressPadding - glowWidth;
+                                - progressPadding;
                     }
                 } else {  // JProgressBar.VERTICAL
                     x = pBarInsets.left + progressPadding;
@@ -275,9 +271,9 @@ public class SynthProgressBarUI extends BasicProgressBarUI
                     y = pBar.getHeight() - pBarInsets.bottom - height
                             - progressPadding;
 
-                    if (SynthLookAndFeel.isLeftToRight(pBar)) {
-                        y -= glowWidth;
-                    }
+                    // When the progress bar is vertical we always paint
+                    // from bottom to top, not matter what the component
+                    // orientation is.
                 }
             }
         } else {
@@ -311,11 +307,8 @@ public class SynthProgressBarUI extends BasicProgressBarUI
             }
             g.setClip(clip);
         } else {
-            if (minBarSize == null || (width >= minBarSize.width
-                    && height >= minBarSize.height)) {
-                context.getPainter().paintProgressBarForeground(context, g,
-                        x, y, width, height, pBar.getOrientation());
-            }
+            context.getPainter().paintProgressBarForeground(context, g,
+                    x, y, width, height, pBar.getOrientation());
         }
 
         if (pBar.isStringPainted()) {
