@@ -1568,7 +1568,7 @@ LEAF(Intrinsic, StateSplit)
     set_needs_null_check(has_receiver);
 
     // some intrinsics can't trap, so don't force them to be pinned
-    if (!can_trap() && !vmIntrinsics::should_be_pinned(_id)) {
+    if (!can_trap()) {
       unpin(PinStateSplitConstructor);
     }
   }

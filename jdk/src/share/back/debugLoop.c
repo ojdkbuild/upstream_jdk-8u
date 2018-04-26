@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2016, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -45,7 +45,7 @@ struct PacketList {
 
 static volatile struct PacketList *cmdQueue;
 static jrawMonitorID cmdQueueLock;
-static jrawMonitorID vmDeathLock;
+static jrawMonitorID resumeLock;
 static jboolean transportError;
 
 static jboolean
@@ -60,17 +60,28 @@ lastCommand(jdwpCmdPacket *cmd)
     }
 }
 
+static jboolean
+resumeCommand(jdwpCmdPacket *cmd)
+{
+    if ( (cmd->cmdSet == JDWP_COMMAND_SET(VirtualMachine)) &&
+         (cmd->cmd == JDWP_COMMAND(VirtualMachine, Resume)) ) {
+        return JNI_TRUE;
+    } else {
+        return JNI_FALSE;
+    }
+}
+
 void
 debugLoop_initialize(void)
 {
-    vmDeathLock = debugMonitorCreate("JDWP VM_DEATH Lock");
+    resumeLock = debugMonitorCreate("JDWP Resume Lock");
 }
 
 void
 debugLoop_sync(void)
 {
-    debugMonitorEnter(vmDeathLock);
-    debugMonitorExit(vmDeathLock);
+    debugMonitorEnter(resumeLock);
+    debugMonitorExit(resumeLock);
 }
 
 /*
@@ -125,13 +136,15 @@ debugLoop_run(void)
             jboolean replyToSender = JNI_TRUE;
 
             /*
-             * For all commands we hold the vmDeathLock
+             * For VirtualMachine.Resume commands we hold the resumeLock
              * while executing and replying to the command. This ensures
-             * that a command after VM_DEATH will be allowed to complete
+             * that a Resume after VM_DEATH will be allowed to complete
              * before the thread posting the VM_DEATH continues VM
              * termination.
              */
-            debugMonitorEnter(vmDeathLock);
+            if (resumeCommand(cmd)) {
+                debugMonitorEnter(resumeLock);
+            }
 
             /* Initialize the input and output streams */
             inStream_init(&in, p);
@@ -168,9 +181,11 @@ debugLoop_run(void)
             }
 
             /*
-             * Release the vmDeathLock as the reply has been posted.
+             * Release the resumeLock as the reply has been posted.
              */
-            debugMonitorExit(vmDeathLock);
+            if (resumeCommand(cmd)) {
+                debugMonitorExit(resumeLock);
+            }
 
             inStream_destroy(&in);
             outStream_destroy(&out);

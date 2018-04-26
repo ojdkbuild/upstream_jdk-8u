@@ -21,20 +21,20 @@
  * questions.
  */
 
+// SunJSSE does not support dynamic system properties, no way to re-use
+// system properties in samevm/agentvm mode.
+
 /*
  * @test
- * @bug 8184328
- * @summary JDK8u131-b34-socketRead0 hang at SSL read
- * @run main/othervm SSLSocketCloseHang
+ * @bug 8148108
+ * @summary Disable Diffie-Hellman keys less than 1024 bits
+ * @run main/othervm -Djdk.tls.ephemeralDHKeySize=legacy LegacyDHEKeyExchange
  */
 
 import java.io.*;
-import java.net.*;
-import java.util.*;
-import java.security.*;
 import javax.net.ssl.*;
 
-public class SSLSocketCloseHang {
+public class LegacyDHEKeyExchange {
 
     /*
      * =============================================================
@@ -47,12 +47,12 @@ public class SSLSocketCloseHang {
      * Both sides can throw exceptions, but do you have a preference
      * as to which side should be the main thread.
      */
-    static boolean separateServerThread = true;
+    static boolean separateServerThread = false;
 
     /*
      * Where do we find the keystores?
      */
-    static String pathToStores = "../../../../sun/security/ssl/etc";
+    static String pathToStores = "../etc";
     static String keyStoreFile = "keystore";
     static String trustStoreFile = "truststore";
     static String passwd = "passphrase";
@@ -61,11 +61,6 @@ public class SSLSocketCloseHang {
      * Is the server ready to serve?
      */
     volatile static boolean serverReady = false;
-
-    /*
-     * Was the client responsible for closing the socket
-     */
-    volatile static boolean clientClosed = false;
 
     /*
      * Turn on SSL debugging?
@@ -100,10 +95,20 @@ public class SSLSocketCloseHang {
          */
         serverReady = true;
 
-        SSLSocket sslSocket = (SSLSocket) sslServerSocket.accept();
-        sslSocket.startHandshake();
-        while (!clientClosed) {
-            Thread.sleep(500);
+        try (SSLSocket sslSocket = (SSLSocket)sslServerSocket.accept()) {
+            InputStream sslIS = sslSocket.getInputStream();
+            OutputStream sslOS = sslSocket.getOutputStream();
+
+            sslIS.read();
+            sslOS.write(85);
+            sslOS.flush();
+
+            throw new Exception(
+                "Legacy DH keys (< 1024) should be restricted");
+        } catch (SSLHandshakeException she) {
+            // ignore, client should terminate the connection
+        } finally {
+            sslServerSocket.close();
         }
     }
 
@@ -114,35 +119,36 @@ public class SSLSocketCloseHang {
      * to avoid infinite hangs.
      */
     void doClientSide() throws Exception {
-        boolean caught = false;
 
         /*
          * Wait for server to get started.
          */
-        System.out.println("waiting on server");
         while (!serverReady) {
             Thread.sleep(50);
         }
-        System.out.println("server ready");
-
-        Socket baseSocket = new Socket("localhost", serverPort);
-        baseSocket.setSoTimeout(100);
 
         SSLSocketFactory sslsf =
             (SSLSocketFactory) SSLSocketFactory.getDefault();
         SSLSocket sslSocket = (SSLSocket)
-            sslsf.createSocket(baseSocket, "localhost", serverPort, false);
+            sslsf.createSocket("localhost", serverPort);
 
-        // handshaking
-        sslSocket.startHandshake();
-        System.out.println("handshake done");
+        String[] suites = new String [] {"TLS_DHE_RSA_WITH_AES_128_CBC_SHA"};
+        sslSocket.setEnabledCipherSuites(suites);
 
-        Thread.sleep(500);
-        System.out.println("client closing");
+        try {
+            InputStream sslIS = sslSocket.getInputStream();
+            OutputStream sslOS = sslSocket.getOutputStream();
 
-        sslSocket.close();
-        clientClosed = true;
-        System.out.println("client closed");
+            sslOS.write(280);
+            sslOS.flush();
+            sslIS.read();
+
+            throw new Exception("Legacy DH keys (< 1024) should be restricted");
+        } catch (SSLHandshakeException she) {
+            // ignore, should be caused by algorithm constraints
+        } finally {
+            sslSocket.close();
+        }
     }
 
     /*
@@ -156,14 +162,12 @@ public class SSLSocketCloseHang {
     volatile Exception serverException = null;
     volatile Exception clientException = null;
 
-    volatile byte[] serverDigest = null;
-
     public static void main(String[] args) throws Exception {
         String keyFilename =
-            System.getProperty("test.src", "./") + "/" + pathToStores +
+            System.getProperty("test.src", ".") + "/" + pathToStores +
                 "/" + keyStoreFile;
         String trustFilename =
-            System.getProperty("test.src", "./") + "/" + pathToStores +
+            System.getProperty("test.src", ".") + "/" + pathToStores +
                 "/" + trustStoreFile;
 
         System.setProperty("javax.net.ssl.keyStore", keyFilename);
@@ -171,13 +175,14 @@ public class SSLSocketCloseHang {
         System.setProperty("javax.net.ssl.trustStore", trustFilename);
         System.setProperty("javax.net.ssl.trustStorePassword", passwd);
 
-        if (debug)
+        if (debug) {
             System.setProperty("javax.net.debug", "all");
+        }
 
         /*
          * Start the tests.
          */
-        new SSLSocketCloseHang();
+        new LegacyDHEKeyExchange();
     }
 
     Thread clientThread = null;
@@ -188,44 +193,83 @@ public class SSLSocketCloseHang {
      *
      * Fork off the other side, then do your work.
      */
-    SSLSocketCloseHang() throws Exception {
-        if (separateServerThread) {
-            startServer(true);
-            startClient(false);
-        } else {
-            startClient(true);
-            startServer(false);
+    LegacyDHEKeyExchange() throws Exception {
+        Exception startException = null;
+        try {
+            if (separateServerThread) {
+                startServer(true);
+                startClient(false);
+            } else {
+                startClient(true);
+                startServer(false);
+            }
+        } catch (Exception e) {
+            startException = e;
         }
 
         /*
          * Wait for other side to close down.
          */
         if (separateServerThread) {
-            serverThread.join();
+            if (serverThread != null) {
+                serverThread.join();
+            }
         } else {
-            clientThread.join();
+            if (clientThread != null) {
+                clientThread.join();
+            }
         }
 
         /*
          * When we get here, the test is pretty much over.
-         *
-         * If the main thread excepted, that propagates back
-         * immediately.  If the other thread threw an exception, we
-         * should report back.
+         * Which side threw the error?
          */
-        if (serverException != null) {
-            System.out.print("Server Exception:");
-            throw serverException;
+        Exception local;
+        Exception remote;
+
+        if (separateServerThread) {
+            remote = serverException;
+            local = clientException;
+        } else {
+            remote = clientException;
+            local = serverException;
         }
-        if (clientException != null) {
-            System.out.print("Client Exception:");
-            throw clientException;
+
+        Exception exception = null;
+
+        /*
+         * Check various exception conditions.
+         */
+        if ((local != null) && (remote != null)) {
+            // If both failed, return the curthread's exception.
+            local.initCause(remote);
+            exception = local;
+        } else if (local != null) {
+            exception = local;
+        } else if (remote != null) {
+            exception = remote;
+        } else if (startException != null) {
+            exception = startException;
         }
+
+        /*
+         * If there was an exception *AND* a startException,
+         * output it.
+         */
+        if (exception != null) {
+            if (exception != startException && startException != null) {
+                exception.addSuppressed(startException);
+            }
+            throw exception;
+        }
+
+        // Fall-through: no exception to throw!
     }
 
     void startServer(boolean newThread) throws Exception {
         if (newThread) {
             serverThread = new Thread() {
+                @Override
                 public void run() {
                     try {
                         doServerSide();
@@ -236,7 +280,6 @@ public class SSLSocketCloseHang {
                          * Release the client, if not active already...
                          */
                         System.err.println("Server died...");
-                        System.err.println(e);
                         serverReady = true;
                         serverException = e;
                     }
@@ -244,13 +287,20 @@ public class SSLSocketCloseHang {
             };
             serverThread.start();
         } else {
-            doServerSide();
+            try {
+                doServerSide();
+            } catch (Exception e) {
+                serverException = e;
+            } finally {
+                serverReady = true;
+            }
         }
     }
 
     void startClient(boolean newThread) throws Exception {
         if (newThread) {
             clientThread = new Thread() {
+                @Override
                 public void run() {
                     try {
                         doClientSide();
@@ -265,7 +315,11 @@ public class SSLSocketCloseHang {
             };
             clientThread.start();
         } else {
-            doClientSide();
+            try {
+                doClientSide();
+            } catch (Exception e) {
+                clientException = e;
+            }
         }
     }
 }
