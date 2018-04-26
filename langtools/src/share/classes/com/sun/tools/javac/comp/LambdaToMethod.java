@@ -265,7 +265,7 @@ public class LambdaToMethod extends TreeTranslator {
     @Override
     public void visitLambda(JCLambda tree) {
         LambdaTranslationContext localContext = (LambdaTranslationContext)context;
-        MethodSymbol sym = (MethodSymbol)localContext.translatedSym;
+        MethodSymbol sym = localContext.translatedSym;
         MethodType lambdaType = (MethodType) sym.type;
 
         {
@@ -1179,14 +1179,12 @@ public class LambdaToMethod extends TreeTranslator {
         @Override
         public void visitClassDef(JCClassDecl tree) {
             List<Frame> prevStack = frameStack;
-            int prevLambdaCount = lambdaCount;
             SyntheticMethodNameCounter prevSyntheticMethodNameCounts =
                     syntheticMethodNameCounts;
             Map<ClassSymbol, Symbol> prevClinits = clinits;
             DiagnosticSource prevSource = log.currentSource();
             try {
                 log.useSource(tree.sym.sourcefile);
-                lambdaCount = 0;
                 syntheticMethodNameCounts = new SyntheticMethodNameCounter();
                 prevClinits = new HashMap<ClassSymbol, Symbol>();
                 if (tree.sym.owner.kind == MTH) {
@@ -1213,7 +1211,6 @@ public class LambdaToMethod extends TreeTranslator {
             finally {
                 log.useSource(prevSource.getFile());
                 frameStack = prevStack;
-                lambdaCount = prevLambdaCount;
                 syntheticMethodNameCounts = prevSyntheticMethodNameCounts;
                 clinits = prevClinits;
             }
@@ -1758,7 +1755,7 @@ public class LambdaToMethod extends TreeTranslator {
             Map<LambdaSymbolKind, Map<Symbol, Symbol>> translatedSymbols;
 
             /** the synthetic symbol for the method hoisting the translated lambda */
-            Symbol translatedSym;
+            MethodSymbol translatedSym;
 
             List<JCVariableDecl> syntheticParams;
 
@@ -1886,7 +1883,7 @@ public class LambdaToMethod extends TreeTranslator {
              * Translate a symbol of a given kind into something suitable for the
              * synthetic lambda body
              */
-            Symbol translate(Name name, final Symbol sym, LambdaSymbolKind skind) {
+            Symbol translate(final Symbol sym, LambdaSymbolKind skind) {
                 Symbol ret;
                 switch (skind) {
                     case CAPTURED_THIS:
@@ -1894,7 +1891,7 @@ public class LambdaToMethod extends TreeTranslator {
                         break;
                     case TYPE_VAR:
                         // Just erase the type var
-                        ret = new VarSymbol(sym.flags(), name,
+                        ret = new VarSymbol(sym.flags(), sym.name,
                                 types.erasure(sym.type), sym.owner);
 
                         /* this information should also be kept for LVT generation at Gen
@@ -1903,7 +1900,7 @@ public class LambdaToMethod extends TreeTranslator {
                         ((VarSymbol)ret).pos = ((VarSymbol)sym).pos;
                         break;
                     case CAPTURED_VAR:
-                        ret = new VarSymbol(SYNTHETIC | FINAL | PARAMETER, name, types.erasure(sym.type), translatedSym) {
+                        ret = new VarSymbol(SYNTHETIC | FINAL | PARAMETER, sym.name, types.erasure(sym.type), translatedSym) {
                             @Override
                             public Symbol baseSymbol() {
                                 //keep mapping with original captured symbol
@@ -1912,16 +1909,16 @@ public class LambdaToMethod extends TreeTranslator {
                         };
                         break;
                     case LOCAL_VAR:
-                        ret = new VarSymbol(sym.flags() & FINAL, name, sym.type, translatedSym);
+                        ret = new VarSymbol(sym.flags() & FINAL, sym.name, sym.type, translatedSym);
                         ((VarSymbol) ret).pos = ((VarSymbol) sym).pos;
                         break;
                     case PARAM:
-                        ret = new VarSymbol((sym.flags() & FINAL) | PARAMETER, name, types.erasure(sym.type), translatedSym);
+                        ret = new VarSymbol((sym.flags() & FINAL) | PARAMETER, sym.name, types.erasure(sym.type), translatedSym);
                         ((VarSymbol) ret).pos = ((VarSymbol) sym).pos;
                         break;
                     default:
-                        ret = makeSyntheticVar(FINAL, name, types.erasure(sym.type), translatedSym);
-                        ((VarSymbol) ret).pos = ((VarSymbol) sym).pos;
+                        Assert.error(skind.name());
+                        throw new AssertionError();
                 }
                 if (ret != sym) {
                     ret.setDeclarationAttributes(sym.getRawAttributes());
@@ -1932,27 +1929,8 @@ public class LambdaToMethod extends TreeTranslator {
 
             void addSymbol(Symbol sym, LambdaSymbolKind skind) {
                 Map<Symbol, Symbol> transMap = getSymbolMap(skind);
-                Name preferredName;
-                switch (skind) {
-                    case CAPTURED_THIS:
-                        preferredName = names.fromString("encl$" + transMap.size());
-                        break;
-                    case CAPTURED_VAR:
-                        preferredName = names.fromString("cap$" + transMap.size());
-                        break;
-                    case LOCAL_VAR:
-                        preferredName = sym.name;
-                        break;
-                    case PARAM:
-                        preferredName = sym.name;
-                        break;
-                    case TYPE_VAR:
-                        preferredName = sym.name;
-                        break;
-                    default: throw new AssertionError();
-                }
                 if (!transMap.containsKey(sym)) {
-                    transMap.put(sym, translate(preferredName, sym, skind));
+                    transMap.put(sym, translate(sym, skind));
                 }
             }
 
@@ -2000,6 +1978,7 @@ public class LambdaToMethod extends TreeTranslator {
 
                 //compute synthetic params
                 ListBuffer<JCVariableDecl> params = new ListBuffer<>();
+                ListBuffer<VarSymbol> parameterSymbols = new ListBuffer<>();
 
                 // The signature of the method is augmented with the following
                 // synthetic parameters:
@@ -2008,18 +1987,15 @@ public class LambdaToMethod extends TreeTranslator {
                 // 2) enclosing locals captured by the lambda expression
                 for (Symbol thisSym : getSymbolMap(CAPTURED_VAR).values()) {
                     params.append(make.VarDef((VarSymbol) thisSym, null));
-                }
-                if (methodReferenceReceiver != null) {
-                    params.append(make.VarDef(
-                            make.Modifiers(PARAMETER|FINAL),
-                            names.fromString("$rcvr$"),
-                            make.Type(methodReferenceReceiver.type),
-                            null));
+                    parameterSymbols.append((VarSymbol) thisSym);
                 }
                 for (Symbol thisSym : getSymbolMap(PARAM).values()) {
                     params.append(make.VarDef((VarSymbol) thisSym, null));
+                    parameterSymbols.append((VarSymbol) thisSym);
                 }
                 syntheticParams = params.toList();
+
+                translatedSym.params = parameterSymbols.toList();
 
                 // Compute and set the lambda name
                 translatedSym.name = isSerializable()
