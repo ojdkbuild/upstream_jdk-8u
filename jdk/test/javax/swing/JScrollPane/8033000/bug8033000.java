@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015, 2016, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2015, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -20,7 +20,6 @@
  * or visit www.oracle.com if you need additional information or have any
  * questions.
  */
-
 import java.awt.BorderLayout;
 import java.awt.Point;
 import java.awt.Robot;
@@ -30,23 +29,22 @@ import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
-
+import javax.swing.UIManager;
 import sun.awt.OSInfo;
 
 /**
  * @test
- * @bug 8033000 8147994
+ * @bug 8033000
  * @author Alexander Scherbatiy
  * @summary No Horizontal Mouse Wheel Support In BasicScrollPaneUI
- * @run main HorizontalMouseWheelOnShiftPressed
+ * @run main bug8033000
  */
-public class HorizontalMouseWheelOnShiftPressed {
+public class bug8033000 {
 
     private static JScrollPane scrollPane;
     private static JTextArea textArea;
     private static Point point;
     private static final int delta;
-    private static JFrame frame;
 
     static {
         delta = OSInfo.getOSType().equals(OSInfo.OSType.MACOSX) ? -30 : 30;
@@ -57,17 +55,9 @@ public class HorizontalMouseWheelOnShiftPressed {
         Robot robot = new Robot();
         robot.setAutoDelay(50);
 
-        SwingUtilities.invokeAndWait(
-                HorizontalMouseWheelOnShiftPressed::createAndShowGUI);
+        SwingUtilities.invokeAndWait(bug8033000::createAndShowGUI);
         robot.waitForIdle();
-        try {
-            test(robot);
-        } finally {
-            frame.dispose();
-        }
-    }
 
-    private static void test(Robot robot) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             Point locationOnScreen = scrollPane.getLocationOnScreen();
             point = new Point(
@@ -83,7 +73,7 @@ public class HorizontalMouseWheelOnShiftPressed {
         robot.waitForIdle();
         robot.mouseWheel(delta);
         robot.waitForIdle();
-        checkScrollPane(true, false);
+        checkScrollPane(true);
 
         // vertical scroll bar is enabled + shift
         initScrollPane(true, false);
@@ -92,14 +82,14 @@ public class HorizontalMouseWheelOnShiftPressed {
         robot.mouseWheel(delta);
         robot.keyRelease(KeyEvent.VK_SHIFT);
         robot.waitForIdle();
-        checkScrollPane(false, false);
+        checkScrollPane(true);
 
         // horizontal scroll bar is enabled
         initScrollPane(false, true);
         robot.waitForIdle();
         robot.mouseWheel(delta);
         robot.waitForIdle();
-        checkScrollPane(false, true);
+        checkScrollPane(false);
 
         // horizontal scroll bar is enabled + shift
         initScrollPane(false, true);
@@ -108,14 +98,14 @@ public class HorizontalMouseWheelOnShiftPressed {
         robot.mouseWheel(delta);
         robot.keyRelease(KeyEvent.VK_SHIFT);
         robot.waitForIdle();
-        checkScrollPane(false, true);
+        checkScrollPane(false);
 
         // both scroll bars are enabled
         initScrollPane(true, true);
         robot.waitForIdle();
         robot.mouseWheel(delta);
         robot.waitForIdle();
-        checkScrollPane(true, false);
+        checkScrollPane(true);
 
         // both scroll bars are enabled + shift
         initScrollPane(true, true);
@@ -124,7 +114,7 @@ public class HorizontalMouseWheelOnShiftPressed {
         robot.mouseWheel(delta);
         robot.keyRelease(KeyEvent.VK_SHIFT);
         robot.waitForIdle();
-        checkScrollPane(false, true);
+        checkScrollPane(false);
     }
 
     static void initScrollPane(boolean vVisible, boolean hVisible) throws Exception {
@@ -139,25 +129,17 @@ public class HorizontalMouseWheelOnShiftPressed {
         });
     }
 
-    static void checkScrollPane(boolean verticalScrolled,
-                                boolean horizontalScrolled) throws Exception {
+    static void checkScrollPane(boolean verticalScrolled) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
 
             if (verticalScrolled) {
-                if (scrollPane.getVerticalScrollBar().getValue() == 0) {
+                if (scrollPane.getVerticalScrollBar().getValue() == 0
+                        || scrollPane.getHorizontalScrollBar().getValue() != 0) {
                     throw new RuntimeException("Wrong vertical scrolling!");
-                }
-            } else{
-                if (scrollPane.getVerticalScrollBar().getValue() != 0) {
-                    throw new RuntimeException("Wrong vertical scrolling!");
-                }
-            }
-            if (horizontalScrolled) {
-                if (scrollPane.getHorizontalScrollBar().getValue() == 0) {
-                    throw new RuntimeException("Wrong horizontal scrolling!");
                 }
             } else {
-                if (scrollPane.getHorizontalScrollBar().getValue() != 0) {
+                if (scrollPane.getVerticalScrollBar().getValue() != 0
+                        || scrollPane.getHorizontalScrollBar().getValue() == 0) {
                     throw new RuntimeException("Wrong horizontal scrolling!");
                 }
             }
@@ -165,10 +147,9 @@ public class HorizontalMouseWheelOnShiftPressed {
     }
 
     static void createAndShowGUI() {
-        frame = new JFrame();
+        JFrame frame = new JFrame();
         frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         frame.setSize(300, 300);
-        frame.setLocationRelativeTo(null);
         textArea = new JTextArea("Hello World!");
         scrollPane = new JScrollPane(textArea);
         JPanel panel = new JPanel(new BorderLayout());

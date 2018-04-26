@@ -1455,7 +1455,6 @@ private:
   void orl(Register dst, int32_t imm32);
   void orl(Register dst, Address src);
   void orl(Register dst, Register src);
-  void orl(Address dst, Register src);
 
   void orq(Address dst, int32_t imm32);
   void orq(Register dst, int32_t imm32);
@@ -1555,8 +1554,6 @@ private:
   void rcll(Register dst, int imm8);
 
   void rclq(Register dst, int imm8);
-
-  void rcrq(Register dst, int imm8);
 
   void rdtsc();
 
