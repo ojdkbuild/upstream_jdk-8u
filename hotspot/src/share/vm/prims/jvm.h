@@ -35,6 +35,9 @@
 #ifdef TARGET_OS_FAMILY_windows
 # include "jvm_windows.h"
 #endif
+#ifdef TARGET_OS_FAMILY_aix
+# include "jvm_aix.h"
+#endif
 #ifdef TARGET_OS_FAMILY_bsd
 # include "jvm_bsd.h"
 #endif
@@ -1481,6 +1484,9 @@ JVM_GetManagement(jint version);
  */
 JNIEXPORT jobject JNICALL
 JVM_InitAgentProperties(JNIEnv *env, jobject agent_props);
+
+JNIEXPORT jstring JNICALL
+JVM_GetTemporaryDirectory(JNIEnv *env);
 
 /* Generics reflection support.
  *

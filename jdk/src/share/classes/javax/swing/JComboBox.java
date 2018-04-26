@@ -1307,13 +1307,15 @@ implements ItemSelectable,ListDataListener,ActionListener, Accessible {
      * do not call or override.
      */
     public void actionPerformed(ActionEvent e) {
-        Object newItem = getEditor().getItem();
-        setPopupVisible(false);
-        getModel().setSelectedItem(newItem);
-        String oldCommand = getActionCommand();
-        setActionCommand("comboBoxEdited");
-        fireActionEvent();
-        setActionCommand(oldCommand);
+        ComboBoxEditor editor = getEditor();
+        if ((editor != null) && (e != null) && (editor == e.getSource())) {
+            setPopupVisible(false);
+            getModel().setSelectedItem(editor.getItem());
+            String oldCommand = getActionCommand();
+            setActionCommand("comboBoxEdited");
+            fireActionEvent();
+            setActionCommand(oldCommand);
+        }
     }
 
     /**
@@ -1413,6 +1415,28 @@ implements ItemSelectable,ListDataListener,ActionListener, Accessible {
             hidePopup();
         }
         super.processKeyEvent(e);
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    protected boolean processKeyBinding(KeyStroke ks, KeyEvent e, int condition, boolean pressed) {
+        if (super.processKeyBinding(ks, e, condition, pressed)) {
+            return true;
+        }
+
+        if (!isEditable() || condition != WHEN_FOCUSED || getEditor() == null
+                || !Boolean.TRUE.equals(getClientProperty("JComboBox.isTableCellEditor"))) {
+            return false;
+        }
+
+        Component editorComponent = getEditor().getEditorComponent();
+        if (editorComponent instanceof JComponent) {
+            JComponent component = (JComponent) editorComponent;
+            return component.processKeyBinding(ks, e, WHEN_FOCUSED, pressed);
+        }
+        return false;
     }
 
     /**

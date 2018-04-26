@@ -364,7 +364,7 @@ void TypeOrigin::print_on(outputStream* str) const {
 
 void ErrorContext::details(outputStream* ss, const Method* method) const {
   if (is_valid()) {
-    ss->print_cr("");
+    ss->cr();
     ss->print_cr("Exception Details:");
     location_details(ss, method);
     reason_details(ss);
@@ -379,7 +379,7 @@ void ErrorContext::reason_details(outputStream* ss) const {
   streamIndentor si(ss);
   ss->indent().print_cr("Reason:");
   streamIndentor si2(ss);
-  ss->indent().print("");
+  ss->indent().print("%s", "");
   switch (_fault) {
     case INVALID_BYTECODE:
       ss->print("Error exists in the bytecode");
@@ -432,7 +432,7 @@ void ErrorContext::reason_details(outputStream* ss) const {
       ShouldNotReachHere();
       ss->print_cr("Unknown");
   }
-  ss->print_cr("");
+  ss->cr();
 }
 
 void ErrorContext::location_details(outputStream* ss, const Method* method) const {
@@ -507,7 +507,7 @@ void ErrorContext::stackmap_details(outputStream* ss, const Method* method) cons
     for (u2 i = 0; i < sm_table->number_of_entries(); ++i) {
       ss->indent();
       sm_frame->print_on(ss, current_offset);
-      ss->print_cr("");
+      ss->cr();
       current_offset += sm_frame->offset_delta();
       sm_frame = sm_frame->next();
     }
@@ -579,7 +579,8 @@ void ClassVerifier::verify_method(methodHandle m, TRAPS) {
     tty->print_cr("Verifying method %s", m->name_and_sig_as_C_string());
   }
 
-  const char* bad_type_msg = "Bad type on operand stack in %s";
+// For clang, the only good constant format string is a literal constant format string.
+#define bad_type_msg "Bad type on operand stack in %s"
 
   int32_t max_stack = m->verifier_max_stack();
   int32_t max_locals = m->max_locals();
@@ -632,8 +633,6 @@ void ClassVerifier::verify_method(methodHandle m, TRAPS) {
   bool no_control_flow = false; // Set to true when there is no direct control
                                 // flow from current instruction to the next
                                 // instruction in sequence
-
-  set_furthest_jump(0);
 
   Bytecodes::Code opcode;
   while (!bcs.is_last_bytecode()) {
@@ -1679,6 +1678,8 @@ void ClassVerifier::verify_method(methodHandle m, TRAPS) {
   }
 }
 
+#undef bad_type_message
+
 char* ClassVerifier::generate_code_data(methodHandle m, u4 code_length, TRAPS) {
   char* code_data = NEW_RESOURCE_ARRAY(char, code_length);
   memset(code_data, 0, sizeof(char) * code_length);
@@ -1791,7 +1792,7 @@ u2 ClassVerifier::verify_stackmap_table(u2 stackmap_index, u2 bci,
       // If matched, current_frame will be updated by this method.
       bool matches = stackmap_table->match_stackmap(
         current_frame, this_offset, stackmap_index,
-        !no_control_flow, true, &ctx, CHECK_VERIFY_(this, 0));
+        !no_control_flow, true, false, &ctx, CHECK_VERIFY_(this, 0));
       if (!matches) {
         // report type error
         verify_error(ctx, "Instruction type does not match stack map");
@@ -1838,7 +1839,7 @@ void ClassVerifier::verify_exception_handler_targets(u2 bci, bool this_uninit, S
       }
       ErrorContext ctx;
       bool matches = stackmap_table->match_stackmap(
-        new_frame, handler_pc, true, false, &ctx, CHECK_VERIFY(this));
+        new_frame, handler_pc, true, false, true, &ctx, CHECK_VERIFY(this));
       if (!matches) {
         verify_error(ctx, "Stack map does not match the one at "
             "exception handler %d", handler_pc);
@@ -1946,7 +1947,7 @@ bool ClassVerifier::is_protected_access(instanceKlassHandle this_class,
   InstanceKlass* target_instance = InstanceKlass::cast(target_class);
   fieldDescriptor fd;
   if (is_method) {
-    Method* m = target_instance->uncached_lookup_method(field_name, field_sig);
+    Method* m = target_instance->uncached_lookup_method(field_name, field_sig, Klass::normal);
     if (m != NULL && m->is_protected()) {
       if (!this_class->is_same_class_package(m->method_holder())) {
         return true;
@@ -2249,13 +2250,6 @@ void ClassVerifier::verify_invoke_init(
       return;
     }
 
-    // Make sure that this call is not jumped over.
-    if (bci < furthest_jump()) {
-      verify_error(ErrorContext::bad_code(bci),
-                   "Bad <init> method call from inside of a branch");
-      return;
-    }
-
     // Make sure that this call is not done from within a TRY block because
     // that can result in returning an incomplete object.  Simply checking
     // (bci >= start_pc) also ensures that this call is not done after a TRY
@@ -2306,7 +2300,7 @@ void ClassVerifier::verify_invoke_init(
         ref_class_type.name(), CHECK_VERIFY(this));
       Method* m = InstanceKlass::cast(ref_klass)->uncached_lookup_method(
         vmSymbols::object_initializer_name(),
-        cp->signature_ref_at(bcs->get_index_u2()));
+        cp->signature_ref_at(bcs->get_index_u2()), Klass::normal);
       // Do nothing if method is not found.  Let resolution detect the error.
       if (m != NULL) {
         instanceKlassHandle mh(THREAD, m->method_holder());
@@ -2391,11 +2385,12 @@ void ClassVerifier::verify_invoke_instructions(
   if (opcode == Bytecodes::_invokedynamic) {
     if (!EnableInvokeDynamic ||
         _klass->major_version() < Verifier::INVOKEDYNAMIC_MAJOR_VERSION) {
-      class_format_error(
-        (!EnableInvokeDynamic ?
-         "invokedynamic instructions not enabled in this JVM" :
-         "invokedynamic instructions not supported by this class file version"),
-        _klass->external_name());
+        if (!EnableInvokeDynamic) {
+            class_format_error("invokedynamic instructions not enabled in this JVM");
+        } else {
+            class_format_error("invokedynamic instructions not supported by this class file version (%d), class %s",
+                               _klass->major_version(), _klass->external_name());
+        }
       return;
     }
   } else {

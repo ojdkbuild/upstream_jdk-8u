@@ -76,7 +76,8 @@ final class MethodTypeForm {
             LF_GEN_INVOKER    = 12,
             LF_CS_LINKER      = 13,  // linkToCallSite_CS
             LF_MH_LINKER      = 14,  // linkToCallSite_MH
-            LF_LIMIT          = 15;
+            LF_GWC            = 15,
+            LF_LIMIT          = 16;
 
     public MethodType erasedType() {
         return erasedType;
@@ -90,8 +91,10 @@ final class MethodTypeForm {
         return lambdaForms[which];
     }
 
-    public LambdaForm setCachedLambdaForm(int which, LambdaForm form) {
-        // Should we perform some sort of CAS, to avoid racy duplication?
+    synchronized public LambdaForm setCachedLambdaForm(int which, LambdaForm form) {
+        // Simulate a CAS, to avoid racy duplication of results.
+        LambdaForm prev = lambdaForms[which];
+        if (prev != null) return prev;
         return lambdaForms[which] = form;
     }
 

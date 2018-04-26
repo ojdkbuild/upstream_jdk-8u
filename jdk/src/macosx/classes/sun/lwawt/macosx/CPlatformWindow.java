@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2013, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2014, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -119,6 +119,7 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
     static final int NONACTIVATING = 1 << 24;
     static final int IS_DIALOG = 1 << 25;
     static final int IS_MODAL = 1 << 26;
+    static final int IS_POPUP = 1 << 27;
 
     static final int _STYLE_PROP_BITMASK = DECORATED | TEXTURED | UNIFIED | UTILITY | HUD | SHEET | CLOSEABLE | MINIMIZABLE | RESIZABLE;
 
@@ -318,6 +319,7 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
             styleBits = SET(styleBits, TEXTURED, false);
             // Popups in applets don't activate applet's process
             styleBits = SET(styleBits, NONACTIVATING, true);
+            styleBits = SET(styleBits, IS_POPUP, true);
         }
 
         if (Window.Type.UTILITY.equals(target.getType())) {
@@ -583,7 +585,12 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
                     // setVisible could have changed the native maximized state
                     deliverZoom(true);
                 } else {
-                    switch (((Frame)target).getExtendedState()) {
+                    int frameState = ((Frame)target).getExtendedState();
+                    if ((frameState & Frame.ICONIFIED) != 0) {
+                        // Treat all state bit masks with ICONIFIED bit as ICONIFIED state.
+                        frameState = Frame.ICONIFIED;
+                    }
+                    switch (frameState) {
                         case Frame.ICONIFIED:
                             CWrapper.NSWindow.miniaturize(nsWindowPtr);
                             break;
@@ -608,9 +615,7 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
             // Add myself as a child
             if (owner != null && owner.isVisible()) {
                 CWrapper.NSWindow.addChildWindow(owner.getNSWindowPtr(), nsWindowPtr, CWrapper.NSWindow.NSWindowAbove);
-                if (target.isAlwaysOnTop()) {
-                    CWrapper.NSWindow.setLevel(nsWindowPtr, CWrapper.NSWindow.NSFloatingWindowLevel);
-                }
+                applyWindowLevel(target);
             }
 
             // Add my own children to myself
@@ -620,9 +625,7 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
                     CPlatformWindow pw = (CPlatformWindow)((LWWindowPeer)p).getPlatformWindow();
                     if (pw != null && pw.isVisible()) {
                         CWrapper.NSWindow.addChildWindow(nsWindowPtr, pw.getNSWindowPtr(), CWrapper.NSWindow.NSWindowAbove);
-                        if (w.isAlwaysOnTop()) {
-                            CWrapper.NSWindow.setLevel(pw.getNSWindowPtr(), CWrapper.NSWindow.NSFloatingWindowLevel);
-                        }
+                        pw.applyWindowLevel(w);
                     }
                 }
             }
@@ -744,20 +747,22 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
     @Override
     public void setOpaque(boolean isOpaque) {
         CWrapper.NSWindow.setOpaque(getNSWindowPtr(), isOpaque);
-        boolean isTextured = (peer == null)? false : peer.isTextured();
-        if (!isOpaque && !isTextured) {
-            long clearColor = CWrapper.NSColor.clearColor();
-            CWrapper.NSWindow.setBackgroundColor(getNSWindowPtr(), clearColor);
+        boolean isTextured = (peer == null) ? false : peer.isTextured();
+        if (!isTextured) {
+            if (!isOpaque) {
+                CWrapper.NSWindow.setBackgroundColor(getNSWindowPtr(), 0);
+            } else if (peer != null) {
+                Color color = peer.getBackground();
+                if (color != null) {
+                    int rgb = color.getRGB();
+                    CWrapper.NSWindow.setBackgroundColor(getNSWindowPtr(), rgb);
+                }
+            }
         }
 
         //This is a temporary workaround. Looks like after 7124236 will be fixed
         //the correct place for invalidateShadow() is CGLayer.drawInCGLContext.
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                invalidateShadow();
-            }
-        });
+        SwingUtilities.invokeLater(this::invalidateShadow);
     }
 
     @Override
@@ -788,6 +793,10 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
         if (prevWindowState == windowState) return;
 
         final long nsWindowPtr = getNSWindowPtr();
+        if ((windowState & Frame.ICONIFIED) != 0) {
+            // Treat all state bit masks with ICONIFIED bit as ICONIFIED state.
+            windowState = Frame.ICONIFIED;
+        }
         switch (windowState) {
             case Frame.ICONIFIED:
                 if (prevWindowState == Frame.MAXIMIZED_BOTH) {
@@ -1041,8 +1050,14 @@ public class CPlatformWindow extends CFRetainedResource implements PlatformWindo
             CWrapper.NSWindow.addChildWindow(nsWindowOwnerPtr, nsWindowSelfPtr, CWrapper.NSWindow.NSWindowAbove);
         }
 
-        if (target.isAlwaysOnTop()) {
+        applyWindowLevel(target);
+    }
+
+    protected void applyWindowLevel(Window target) {
+        if (target.isAlwaysOnTop() && target.getType() != Window.Type.POPUP) {
             CWrapper.NSWindow.setLevel(getNSWindowPtr(), CWrapper.NSWindow.NSFloatingWindowLevel);
+        } else if (target.getType() == Window.Type.POPUP) {
+            CWrapper.NSWindow.setLevel(getNSWindowPtr(), CWrapper.NSWindow.NSPopUpMenuWindowLevel);
         }
     }
 
