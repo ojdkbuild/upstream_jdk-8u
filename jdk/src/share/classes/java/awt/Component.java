@@ -174,7 +174,7 @@ import sun.util.logging.PlatformLogger;
  * <a href="http://www.oracle.com/technetwork/java/painting-140037.html">Painting in AWT and Swing</a>.
  * <p>
  * For details on the focus subsystem, see
- * <a href="http://docs.oracle.com/javase/tutorial/uiswing/misc/focus.html">
+ * <a href="https://docs.oracle.com/javase/tutorial/uiswing/misc/focus.html">
  * How to Use the Focus Subsystem</a>,
  * a section in <em>The Java Tutorial</em>, and the
  * <a href="../../java/awt/doc-files/FocusSpec.html">Focus Specification</a>
@@ -3400,7 +3400,7 @@ public abstract class Component implements ImageObserver, MenuContainer,
                 (width > 0) && (height > 0)) {
                 PaintEvent e = new PaintEvent(this, PaintEvent.UPDATE,
                                               new Rectangle(x, y, width, height));
-                Toolkit.getEventQueue().postEvent(e);
+                SunToolkit.postEvent(SunToolkit.targetToAppContext(this), e);
             }
         }
     }
