@@ -33,6 +33,7 @@
 #include <process.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
+#include <WinError.h>
 
 #include "java_net_InetAddress.h"
 #include "java_net_Inet4AddressImpl.h"
@@ -292,7 +293,6 @@ Java_java_net_Inet4AddressImpl_getHostByAddr(JNIEnv *env, jobject this,
 }
 
 
-
 static BOOL
 WindowsVersionCheck(WORD wMajorVersion, WORD wMinorVersion, WORD wServicePackMajor) {
     OSVERSIONINFOEXW osvi = { sizeof(osvi), 0, 0, 0, 0, {0}, 0, 0 };
@@ -316,7 +316,7 @@ isVistaSP1OrGreater() {
 }
 
 static jboolean
-wxp_ping4(JNIEnv *env,
+tcp_ping4(JNIEnv *env,
           jbyteArray addrArray,
           jint timeout,
           jbyteArray ifArray,
@@ -471,24 +471,26 @@ static jboolean
 ping4(JNIEnv *env,
       unsigned long src_addr,
       unsigned long dest_addr,
-      jint timeout)
+      jint timeout,
+      HANDLE hIcmpFile)
 {
     // See https://msdn.microsoft.com/en-us/library/aa366050%28VS.85%29.aspx
 
-    HANDLE hIcmpFile;
     DWORD dwRetVal = 0;
     char SendData[32] = {0};
     LPVOID ReplyBuffer = NULL;
     DWORD ReplySize = 0;
     jboolean ret = JNI_FALSE;
 
-    hIcmpFile = IcmpCreateFile();
-    if (hIcmpFile == INVALID_HANDLE_VALUE) {
-        NET_ThrowNew(env, WSAGetLastError(), "Unable to open handle");
-        return JNI_FALSE;
-    }
+    // https://msdn.microsoft.com/en-us/library/windows/desktop/aa366051%28v=vs.85%29.aspx
+    ReplySize = sizeof(ICMP_ECHO_REPLY)   // The buffer should be large enough
+                                          // to hold at least one ICMP_ECHO_REPLY
+                                          // structure
+                + sizeof(SendData)        // plus RequestSize bytes of data.
+                + 8;                      // This buffer should also be large enough
+                                          // to also hold 8 more bytes of data
+                                          // (the size of an ICMP error message)
 
-    ReplySize = sizeof(ICMP_ECHO_REPLY) + sizeof(SendData);
     ReplyBuffer = (VOID*) malloc(ReplySize);
     if (ReplyBuffer == NULL) {
         IcmpCloseHandle(hIcmpFile);
@@ -524,10 +526,45 @@ ping4(JNIEnv *env,
                                    (timeout < 1000) ? 1000 : timeout);   // DWORD Timeout
     }
 
-    if (dwRetVal != 0) {
+    if (dwRetVal == 0) { // if the call failed
+        TCHAR *buf;
+        DWORD err = WSAGetLastError();
+        switch (err) {
+            case ERROR_NO_NETWORK:
+            case ERROR_NETWORK_UNREACHABLE:
+            case ERROR_HOST_UNREACHABLE:
+            case ERROR_PROTOCOL_UNREACHABLE:
+            case ERROR_PORT_UNREACHABLE:
+            case ERROR_REQUEST_ABORTED:
+            case ERROR_INCORRECT_ADDRESS:
+            case ERROR_HOST_DOWN:
+            case WSAEHOSTUNREACH:   /* Host Unreachable */
+            case WSAENETUNREACH:    /* Network Unreachable */
+            case WSAENETDOWN:       /* Network is down */
+            case WSAEPFNOSUPPORT:   /* Protocol Family unsupported */
+            case IP_REQ_TIMED_OUT:
+                break;
+            default:
+                FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
+                        NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                        (LPTSTR)&buf, 0, NULL);
+                NET_ThrowNew(env, err, buf);
+                LocalFree(buf);
+                break;
+        }
+    } else {
         PICMP_ECHO_REPLY pEchoReply = (PICMP_ECHO_REPLY)ReplyBuffer;
-        if ((int)pEchoReply->RoundTripTime <= timeout)
+
+        // This is to take into account the undocumented minimum
+        // timeout mentioned in the IcmpSendEcho call above.
+        // We perform an extra check to make sure that our
+        // roundtrip time was less than our desired timeout
+        // for cases where that timeout is < 1000ms.
+        if (pEchoReply->Status == IP_SUCCESS
+                && (int)pEchoReply->RoundTripTime <= timeout)
+        {
             ret = JNI_TRUE;
+        }
     }
 
     free(ReplyBuffer);
@@ -553,6 +590,7 @@ Java_java_net_Inet4AddressImpl_isReachable0(JNIEnv *env, jobject this,
         jint dest_addr = 0;
         jbyte caddr[4];
         int sz;
+        HANDLE hIcmpFile;
 
         /**
          * Convert IP address from byte array to integer
@@ -583,8 +621,20 @@ Java_java_net_Inet4AddressImpl_isReachable0(JNIEnv *env, jobject this,
             src_addr = htonl(src_addr);
         }
 
-        return ping4(env, src_addr, dest_addr, timeout);
+        hIcmpFile = IcmpCreateFile();
+        if (hIcmpFile == INVALID_HANDLE_VALUE) {
+            int err = WSAGetLastError();
+            if (err == ERROR_ACCESS_DENIED) {
+                // fall back to TCP echo if access is denied to ICMP
+                return tcp_ping4(env, addrArray, timeout, ifArray, ttl);
+            } else {
+                NET_ThrowNew(env, err, "Unable to create ICMP file handle");
+                return JNI_FALSE;
+            }
+        } else {
+            return ping4(env, src_addr, dest_addr, timeout, hIcmpFile);
+        }
     } else {
-        wxp_ping4(env, addrArray, timeout, ifArray, ttl);
+        tcp_ping4(env, addrArray, timeout, ifArray, ttl);
     }
 }
