@@ -1151,7 +1151,6 @@ void nmethod::clear_inline_caches() {
 // Clear ICStubs of all compiled ICs
 void nmethod::clear_ic_stubs() {
   assert_locked_or_safepoint(CompiledIC_lock);
-  ResourceMark rm;
   RelocIterator iter(this);
   while(iter.next()) {
     if (iter.type() == relocInfo::virtual_call_type) {

@@ -64,20 +64,16 @@
 
     jobject fCompLocal = (*env)->NewLocalRef(env, fComponent);
     if ((*env)->IsSameObject(env, fCompLocal, NULL)) {
-        return nil;
+        return @"unknown";
     }
     NSString *str = nil;
-    jstring jstr = JNFCallStaticObjectMethod( env,
-                                              jm_getAccessibleActionDescription,
-                                              fAccessibleAction,
-                                              fIndex,
-                                              fCompLocal );
+    jobject jstr = JNFCallStaticObjectMethod(env, jm_getAccessibleActionDescription, fAccessibleAction, fIndex, fCompLocal);
     if (jstr != NULL) {
-        str = JNFJavaToNSString(env, jstr); // AWT_THREADING Safe (AWTRunLoopMode)
+        NSString *str = JNFJavaToNSString(env, jstr); // AWT_THREADING Safe (AWTRunLoopMode)
         (*env)->DeleteLocalRef(env, jstr);
     }
     (*env)->DeleteLocalRef(env, fCompLocal);
-    return str;
+    return str == nil ? @"unknown" : str;
 }
 
 - (void)perform

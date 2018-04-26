@@ -23,10 +23,8 @@
 
 /**
  * @test
- * @bug 8059556 8158639
- *
+ * @bug 8059556
  * @run main/othervm -Xbatch NullConstantReceiver
- * @run main/othervm -Xbatch -XX:CompileCommand=exclude,*::run NullConstantReceiver
  */
 
 import java.lang.invoke.MethodHandle;

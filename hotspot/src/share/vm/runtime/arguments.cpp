@@ -3193,8 +3193,6 @@ jint Arguments::parse_each_vm_init_arg(const JavaVMInitArgs* args,
 
       // Enable parallel GC and adaptive generation sizing
       FLAG_SET_CMDLINE(bool, UseParallelGC, true);
-      FLAG_SET_DEFAULT(ParallelGCThreads,
-                       Abstract_VM_Version::parallel_worker_threads());
 
       // Encourage steady state memory management
       FLAG_SET_CMDLINE(uintx, ThresholdTolerance, 100);
@@ -4057,16 +4055,6 @@ jint Arguments::apply_ergo() {
   set_ergonomics_flags();
 
   set_shared_spaces_flags();
-
-#if defined(SPARC)
-  // BIS instructions require 'membar' instruction regardless of the number
-  // of CPUs because in virtualized/container environments which might use only 1
-  // CPU, BIS instructions may produce incorrect results.
-
-  if (FLAG_IS_DEFAULT(AssumeMP)) {
-    FLAG_SET_DEFAULT(AssumeMP, true);
-  }
-#endif
 
   // Check the GC selections again.
   if (!check_gc_consistency()) {

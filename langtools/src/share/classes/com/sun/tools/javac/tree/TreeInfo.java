@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2017, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2014, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -35,7 +35,6 @@ import com.sun.tools.javac.comp.Env;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.tree.JCTree.JCPolyExpression.*;
 import com.sun.tools.javac.util.*;
-
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import static com.sun.tools.javac.code.Flags.*;
 import static com.sun.tools.javac.code.TypeTag.BOT;
@@ -612,21 +611,13 @@ public class TreeInfo {
         };
     }
 
-    public enum PosKind {
-        START_POS() { int  toPos(JCTree tree) { return TreeInfo.getStartPos(tree); } },
-        FIRST_STAT_POS() { int  toPos(JCTree tree) { return firstStatPos(tree); } },
-        END_POS() { int  toPos(JCTree tree) { return endPos(tree); } };
-
-        abstract int toPos(JCTree tree);
-    }
-
     /** The position of the finalizer of given try/synchronized statement.
      */
-    public static int finalizerPos(JCTree tree, PosKind posKind) {
+    public static int finalizerPos(JCTree tree) {
         if (tree.hasTag(TRY)) {
             JCTry t = (JCTry) tree;
             Assert.checkNonNull(t.finalizer);
-            return posKind.toPos(t.finalizer);
+            return firstStatPos(t.finalizer);
         } else if (tree.hasTag(SYNCHRONIZED)) {
             return endPos(((JCSynchronized) tree).body);
         } else {

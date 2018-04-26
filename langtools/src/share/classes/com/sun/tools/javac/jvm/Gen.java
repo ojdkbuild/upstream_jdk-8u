@@ -27,7 +27,6 @@ package com.sun.tools.javac.jvm;
 
 import java.util.*;
 
-import com.sun.tools.javac.tree.TreeInfo.PosKind;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.JCDiagnostic.DiagnosticPosition;
 import com.sun.tools.javac.util.List;
@@ -1532,16 +1531,12 @@ public class Gen extends JCTree.Visitor {
                                   catchallpc, 0);
                     startseg = env.info.gaps.next().intValue();
                 }
-                code.statBegin(TreeInfo.finalizerPos(env.tree, PosKind.FIRST_STAT_POS));
+                code.statBegin(TreeInfo.finalizerPos(env.tree));
                 code.markStatBegin();
 
                 Item excVar = makeTemp(syms.throwableType);
                 excVar.store();
                 genFinalizer(env);
-                code.resolvePending();
-                code.statBegin(TreeInfo.finalizerPos(env.tree, PosKind.END_POS));
-                code.markStatBegin();
-
                 excVar.load();
                 registerCatch(body.pos(), startseg,
                               env.info.gaps.next().intValue(),
@@ -1555,7 +1550,7 @@ public class Gen extends JCTree.Visitor {
                     code.resolve(env.info.cont);
 
                     // Mark statement line number
-                    code.statBegin(TreeInfo.finalizerPos(env.tree, PosKind.FIRST_STAT_POS));
+                    code.statBegin(TreeInfo.finalizerPos(env.tree));
                     code.markStatBegin();
 
                     // Save return address.

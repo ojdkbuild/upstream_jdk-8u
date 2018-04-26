@@ -349,9 +349,9 @@ AwtFileDialog::Show(void *p)
 
         // show the Win32 file dialog
         if (mode == java_awt_FileDialog_LOAD) {
-            result = ::GetOpenFileName(&ofn);
+            result = AwtFileDialog::GetOpenFileName(&ofn);
         } else {
-            result = ::GetSaveFileName(&ofn);
+            result = AwtFileDialog::GetSaveFileName(&ofn);
         }
         // Fix for 4181310: FileDialog does not show up.
         // If the dialog is not shown because of invalid file name
@@ -361,9 +361,9 @@ AwtFileDialog::Show(void *p)
             if (dlgerr == FNERR_INVALIDFILENAME) {
                 _tcscpy_s(fileBuffer, bufferLimit, TEXT(""));
                 if (mode == java_awt_FileDialog_LOAD) {
-                    result = ::GetOpenFileName(&ofn);
+                    result = AwtFileDialog::GetOpenFileName(&ofn);
                 } else {
-                    result = ::GetSaveFileName(&ofn);
+                    result = AwtFileDialog::GetSaveFileName(&ofn);
                 }
             }
         }
@@ -420,6 +420,22 @@ AwtFileDialog::Show(void *p)
     delete[] currentDirectory;
     if (ofn.lpstrFile)
         delete[] ofn.lpstrFile;
+}
+
+BOOL
+AwtFileDialog::GetOpenFileName(LPOPENFILENAME data) {
+    return static_cast<BOOL>(reinterpret_cast<INT_PTR>(
+        AwtToolkit::GetInstance().InvokeFunction((void*(*)(void*))
+                     ::GetOpenFileName, data)));
+
+}
+
+BOOL
+AwtFileDialog::GetSaveFileName(LPOPENFILENAME data) {
+    return static_cast<BOOL>(reinterpret_cast<INT_PTR>(
+        AwtToolkit::GetInstance().InvokeFunction((void *(*)(void *))
+                     ::GetSaveFileName, data)));
+
 }
 
 BOOL AwtFileDialog::InheritsNativeMouseWheelBehavior() {return true;}
@@ -569,10 +585,9 @@ Java_sun_awt_windows_WFileDialogPeer__1show(JNIEnv *env, jobject peer)
      */
     jobject peerGlobal = env->NewGlobalRef(peer);
 
-    if (!AwtToolkit::GetInstance().PostMessage(WM_AWT_INVOKE_METHOD,
-                             (WPARAM)AwtFileDialog::Show, (LPARAM)peerGlobal)) {
-        env->DeleteGlobalRef(peerGlobal);
-    }
+    AwtToolkit::GetInstance().InvokeFunction(AwtFileDialog::Show, peerGlobal);
+
+    env->DeleteGlobalRef(peerGlobal);
 
     CATCH_BAD_ALLOC;
 }
