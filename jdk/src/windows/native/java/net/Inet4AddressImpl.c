@@ -33,7 +33,6 @@
 #include <process.h>
 #include <iphlpapi.h>
 #include <icmpapi.h>
-#include <WinError.h>
 
 #include "java_net_InetAddress.h"
 #include "java_net_Inet4AddressImpl.h"
@@ -489,15 +488,7 @@ ping4(JNIEnv *env,
         return JNI_FALSE;
     }
 
-    // https://msdn.microsoft.com/en-us/library/windows/desktop/aa366051%28v=vs.85%29.aspx
-    ReplySize = sizeof(ICMP_ECHO_REPLY)   // The buffer should be large enough
-                                          // to hold at least one ICMP_ECHO_REPLY
-                                          // structure
-                + sizeof(SendData)        // plus RequestSize bytes of data.
-                + 8;                      // This buffer should also be large enough
-                                          // to also hold 8 more bytes of data
-                                          // (the size of an ICMP error message)
-
+    ReplySize = sizeof(ICMP_ECHO_REPLY) + sizeof(SendData);
     ReplyBuffer = (VOID*) malloc(ReplySize);
     if (ReplyBuffer == NULL) {
         IcmpCloseHandle(hIcmpFile);
@@ -533,45 +524,10 @@ ping4(JNIEnv *env,
                                    (timeout < 1000) ? 1000 : timeout);   // DWORD Timeout
     }
 
-    if (dwRetVal == 0) { // if the call failed
-        TCHAR *buf;
-        DWORD err = WSAGetLastError();
-        switch (err) {
-            case ERROR_NO_NETWORK:
-            case ERROR_NETWORK_UNREACHABLE:
-            case ERROR_HOST_UNREACHABLE:
-            case ERROR_PROTOCOL_UNREACHABLE:
-            case ERROR_PORT_UNREACHABLE:
-            case ERROR_REQUEST_ABORTED:
-            case ERROR_INCORRECT_ADDRESS:
-            case ERROR_HOST_DOWN:
-            case WSAEHOSTUNREACH:   /* Host Unreachable */
-            case WSAENETUNREACH:    /* Network Unreachable */
-            case WSAENETDOWN:       /* Network is down */
-            case WSAEPFNOSUPPORT:   /* Protocol Family unsupported */
-            case IP_REQ_TIMED_OUT:
-                break;
-            default:
-                FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM,
-                        NULL, err, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                        (LPTSTR)&buf, 0, NULL);
-                NET_ThrowNew(env, err, buf);
-                LocalFree(buf);
-                break;
-        }
-    } else {
+    if (dwRetVal != 0) {
         PICMP_ECHO_REPLY pEchoReply = (PICMP_ECHO_REPLY)ReplyBuffer;
-
-        // This is to take into account the undocumented minimum
-        // timeout mentioned in the IcmpSendEcho call above.
-        // We perform an extra check to make sure that our
-        // roundtrip time was less than our desired timeout
-        // for cases where that timeout is < 1000ms.
-        if (pEchoReply->Status == IP_SUCCESS
-                && (int)pEchoReply->RoundTripTime <= timeout)
-        {
+        if ((int)pEchoReply->RoundTripTime <= timeout)
             ret = JNI_TRUE;
-        }
     }
 
     free(ReplyBuffer);

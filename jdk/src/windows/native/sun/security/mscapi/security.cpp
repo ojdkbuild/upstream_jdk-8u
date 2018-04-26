@@ -352,50 +352,38 @@ JNIEXPORT void JNICALL Java_sun_security_mscapi_KeyStore_loadKeysOrCertificateCh
             BOOL bHasNoPrivateKey = FALSE;
             DWORD dwPublicKeyLength = 0;
 
-            // First, probe it silently
-            if (::CryptAcquireCertificatePrivateKey(pCertContext, CRYPT_ACQUIRE_SILENT_FLAG, NULL,
-                    &hCryptProv, &dwKeySpec, &bCallerFreeProv) == FALSE
-                && GetLastError() != NTE_SILENT_CONTEXT)
+            if (::CryptAcquireCertificatePrivateKey(pCertContext, NULL, NULL,
+                                                    &hCryptProv, &dwKeySpec, &bCallerFreeProv) == FALSE)
             {
                 bHasNoPrivateKey = TRUE;
-            }
-            else
-            {
-                if (bCallerFreeProv == TRUE) {
-                    ::CryptReleaseContext(hCryptProv, NULL);
-                    bCallerFreeProv = FALSE;
-                }
 
-                // Second, acquire the key normally (not silently)
-                if (::CryptAcquireCertificatePrivateKey(pCertContext, 0, NULL,
-                        &hCryptProv, &dwKeySpec, &bCallerFreeProv) == FALSE)
+            } else {
+                // Private key is available
+
+                BOOL bGetUserKey = ::CryptGetUserKey(hCryptProv, dwKeySpec, &hUserKey);
+
+                // Skip certificate if cannot find private key
+                if (bGetUserKey == FALSE)
                 {
-                    bHasNoPrivateKey = TRUE;
+                    if (bCallerFreeProv)
+                        ::CryptReleaseContext(hCryptProv, NULL);
+
+                    continue;
                 }
-                else
-                {
-                    // Private key is available
-                    BOOL bGetUserKey = ::CryptGetUserKey(hCryptProv, dwKeySpec, &hUserKey);
 
-                    // Skip certificate if cannot find private key
-                    if (bGetUserKey == FALSE) {
-                        if (bCallerFreeProv)
-                            ::CryptReleaseContext(hCryptProv, NULL);
-                        continue;
-                    }
+                // Set cipher mode to ECB
+                DWORD dwCipherMode = CRYPT_MODE_ECB;
+                ::CryptSetKeyParam(hUserKey, KP_MODE, (BYTE*)&dwCipherMode, NULL);
 
-                    // Set cipher mode to ECB
-                    DWORD dwCipherMode = CRYPT_MODE_ECB;
-                    ::CryptSetKeyParam(hUserKey, KP_MODE, (BYTE*)&dwCipherMode, NULL);
 
-                    // If the private key is present in smart card, we may not be able to
-                    // determine the key length by using the private key handle. However,
-                    // since public/private key pairs must have the same length, we could
-                    // determine the key length of the private key by using the public key
-                    // in the certificate.
-                    dwPublicKeyLength = ::CertGetPublicKeyLength(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
-                            &(pCertContext->pCertInfo->SubjectPublicKeyInfo));
-                }
+                // If the private key is present in smart card, we may not be able to
+                // determine the key length by using the private key handle. However,
+                // since public/private key pairs must have the same length, we could
+                // determine the key length of the private key by using the public key
+                // in the certificate.
+                dwPublicKeyLength = ::CertGetPublicKeyLength(X509_ASN_ENCODING | PKCS_7_ASN_ENCODING,
+                        &(pCertContext->pCertInfo->SubjectPublicKeyInfo));
+
             }
             PCCERT_CHAIN_CONTEXT pCertChainContext = NULL;
 
@@ -404,7 +392,8 @@ JNIEXPORT void JNICALL Java_sun_security_mscapi_KeyStore_loadKeysOrCertificateCh
             //
             if (GetCertificateChain(OID_EKU_ANY, pCertContext, &pCertChainContext))
             {
-                for (DWORD i = 0; i < pCertChainContext->cChain; i++)
+
+                for (unsigned int i=0; i < pCertChainContext->cChain; i++)
                 {
                     // Found cert chain
                     PCERT_SIMPLE_CHAIN rgpChain =
@@ -454,7 +443,6 @@ JNIEXPORT void JNICALL Java_sun_security_mscapi_KeyStore_loadKeysOrCertificateCh
                         // cert collection
                         env->CallVoidMethod(obj, mGenCert, byteArray, jArrayList);
                     }
-
                     if (bHasNoPrivateKey)
                     {
                         // Generate certificate chain and store into cert chain
@@ -1373,57 +1361,43 @@ JNIEXPORT jlong JNICALL Java_sun_security_mscapi_RSACipher_getKeyFromCert
     HCRYPTPROV hCryptProv = NULL;
     HCRYPTKEY hKey = NULL;
     DWORD dwKeySpec;
-    BOOL bCallerFreeProv = FALSE;
-    BOOL bRes;
 
     __try
     {
         if (usePrivateKey == JNI_TRUE) {
             // Locate the key container for the certificate's private key
+            if (!(::CryptAcquireCertificatePrivateKey(
+                (PCCERT_CONTEXT) pCertContext, 0, NULL, &hCryptProv,
+                &dwKeySpec, NULL))) {
 
-            // First, probe it silently
-            bRes = ::CryptAcquireCertificatePrivateKey(
-                    (PCCERT_CONTEXT) pCertContext, CRYPT_ACQUIRE_SILENT_FLAG,
-                    NULL, &hCryptProv, &dwKeySpec, &bCallerFreeProv);
-
-            if (bRes == FALSE && GetLastError() != NTE_SILENT_CONTEXT)
-            {
-                ThrowException(env, KEYSTORE_EXCEPTION, GetLastError());
-                __leave;
-            }
-
-            if (bCallerFreeProv == TRUE) {
-                ::CryptReleaseContext(hCryptProv, NULL);
-                bCallerFreeProv = FALSE;
-            }
-
-            // Now, do it normally (not silently)
-            if (::CryptAcquireCertificatePrivateKey(
-                    (PCCERT_CONTEXT) pCertContext, 0, NULL, &hCryptProv,
-                    &dwKeySpec, &bCallerFreeProv) == FALSE)
-            {
                 ThrowException(env, KEYSTORE_EXCEPTION, GetLastError());
                 __leave;
             }
 
             // Get a handle to the private key
-            if (::CryptGetUserKey(hCryptProv, dwKeySpec, &hKey) == FALSE) {
+            if (!(::CryptGetUserKey(hCryptProv, dwKeySpec, &hKey))) {
                 ThrowException(env, KEY_EXCEPTION, GetLastError());
                 __leave;
             }
-        }
-        else // use public key
-        {
-            bCallerFreeProv = TRUE;
+
+        } else { // use public key
 
             //  Acquire a CSP context.
-            if (::CryptAcquireContext(&hCryptProv, "J2SE", NULL,
-                    PROV_RSA_FULL, 0) == FALSE)
+            if(::CryptAcquireContext(
+               &hCryptProv,
+               "J2SE",
+               NULL,
+               PROV_RSA_FULL,
+               0) == FALSE)
             {
                 // If CSP context hasn't been created, create one.
                 //
-                if (::CryptAcquireContext(&hCryptProv, "J2SE", NULL,
-                        PROV_RSA_FULL, CRYPT_NEWKEYSET) == FALSE)
+                if (::CryptAcquireContext(
+                    &hCryptProv,
+                    "J2SE",
+                    NULL,
+                    PROV_RSA_FULL,
+                    CRYPT_NEWKEYSET) == FALSE)
                 {
                     ThrowException(env, KEYSTORE_EXCEPTION, GetLastError());
                     __leave;
@@ -1431,10 +1405,10 @@ JNIEXPORT jlong JNICALL Java_sun_security_mscapi_RSACipher_getKeyFromCert
             }
 
             // Import the certificate's public key into the key container
-            if (::CryptImportPublicKeyInfo(hCryptProv, X509_ASN_ENCODING,
-                    &(((PCCERT_CONTEXT) pCertContext)->pCertInfo->SubjectPublicKeyInfo),
-                    &hKey) == FALSE)
-            {
+            if (!(::CryptImportPublicKeyInfo(hCryptProv, X509_ASN_ENCODING,
+                &(((PCCERT_CONTEXT) pCertContext)->pCertInfo->SubjectPublicKeyInfo),
+                &hKey))) {
+
                 ThrowException(env, KEY_EXCEPTION, GetLastError());
                 __leave;
             }
@@ -1445,7 +1419,7 @@ JNIEXPORT jlong JNICALL Java_sun_security_mscapi_RSACipher_getKeyFromCert
         //--------------------------------------------------------------------
         // Clean up.
 
-        if (bCallerFreeProv == TRUE && hCryptProv != NULL)
+        if (hCryptProv)
             ::CryptReleaseContext(hCryptProv, 0);
     }
 
